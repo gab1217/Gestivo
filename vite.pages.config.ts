@@ -2,11 +2,12 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  root: "github-pages",
   base: "/Gestivo/",
-  publicDir: "public",
+  publicDir: "../public",
   plugins: [react()],
   build: {
-    outDir: "pages-dist",
+    outDir: "../pages-dist",
     emptyOutDir: true,
   },
 });
