@@ -14,6 +14,8 @@ type TFLiteBrowserApi = {
 };
 
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const PUBLIC_BASE = typeof window !== "undefined" && window.location.hostname.endsWith("github.io") ? "/Gestivo" : "";
+const publicAsset = (path: string) => `${PUBLIC_BASE}${path}`;
 const CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
   [5, 9], [9, 10], [10, 11], [11, 12], [9, 13], [13, 14], [14, 15],
@@ -112,21 +114,21 @@ export default function GestivoApp() {
         await tf.ready();
         const browserGlobal = window as unknown as { tf: typeof tf; tflite?: TFLiteBrowserApi };
         browserGlobal.tf = tf;
-        await loadBrowserScript("/vendor/tf-tflite.min.js");
+        await loadBrowserScript(publicAsset("/vendor/tf-tflite.min.js"));
         const tflite = browserGlobal.tflite;
         if (!tflite) throw new Error("TensorFlow Lite browser engine did not initialize");
-        tflite.setWasmPath("/tflite-wasm/");
-        const fileset = await vision.FilesetResolver.forVisionTasks("/mediapipe-wasm");
+        tflite.setWasmPath(publicAsset("/tflite-wasm/"));
+        const fileset = await vision.FilesetResolver.forVisionTasks(publicAsset("/mediapipe-wasm"));
         const [handLandmarker, imageModel, landmarkModel] = await Promise.all([
           vision.HandLandmarker.createFromOptions(fileset, {
-            baseOptions: { modelAssetPath: "/models/hand_landmarker.task" },
+            baseOptions: { modelAssetPath: publicAsset("/models/hand_landmarker.task") },
             runningMode: "VIDEO", numHands: 1,
             minHandDetectionConfidence: 0.55,
             minHandPresenceConfidence: 0.55,
             minTrackingConfidence: 0.55,
           }),
-          tflite.loadTFLiteModel("/models/fsl_model.tflite"),
-          tflite.loadTFLiteModel("/models/landmark_model.tflite"),
+          tflite.loadTFLiteModel(publicAsset("/models/fsl_model.tflite")),
+          tflite.loadTFLiteModel(publicAsset("/models/landmark_model.tflite")),
         ]);
         if (cancelled) { handLandmarker.close(); return; }
         engineRef.current = { handLandmarker, imageModel, landmarkModel, tf };
@@ -153,7 +155,7 @@ export default function GestivoApp() {
     };
     updateVoices();
     window.speechSynthesis?.addEventListener("voiceschanged", updateVoices);
-    navigator.serviceWorker?.register("/service-worker.js").catch(() => undefined);
+    navigator.serviceWorker?.register(publicAsset("/service-worker.js"), { scope: `${PUBLIC_BASE}/` }).catch(() => undefined);
     return () => window.speechSynthesis?.removeEventListener("voiceschanged", updateVoices);
   }, [voiceName]);
 
@@ -318,7 +320,7 @@ export default function GestivoApp() {
   return (
     <main className={`site text-${textScale}`}>
       <nav className="nav shell" aria-label="Main navigation">
-        <a className="brand" href="#top" aria-label="Gestivo home"><img src="/gestivo-logo.png" alt="" /><span>Gestivo</span></a>
+        <a className="brand" href="#top" aria-label="Gestivo home"><img src={publicAsset("/gestivo-logo.png")} alt="" /><span>Gestivo</span></a>
         <div className="nav-links"><a href="#translator">Translator</a><a href="#download">Download</a><a href="#about">About</a></div>
         <a className="nav-cta" href="#translator">Open translator</a>
       </nav>
@@ -350,7 +352,7 @@ export default function GestivoApp() {
           </div>
 
           <div className="recognition-panel">
-            <div className="camera-live"><video ref={videoRef} muted playsInline aria-label="Front camera preview" /><canvas ref={overlayRef} aria-hidden="true" />{!cameraRunning && <div className="camera-placeholder"><img src="/gestivo-logo.png" alt="" /><strong>{modelsReady ? "Camera paused" : "Loading private AI"}</strong><span>{modelStatus}</span></div>}<div className="camera-badge"><i className={cameraRunning ? "on" : ""} />{modelStatus}</div><div className="live-letter">{liveLetter}</div></div>
+            <div className="camera-live"><video ref={videoRef} muted playsInline aria-label="Front camera preview" /><canvas ref={overlayRef} aria-hidden="true" />{!cameraRunning && <div className="camera-placeholder"><img src={publicAsset("/gestivo-logo.png")} alt="" /><strong>{modelsReady ? "Camera paused" : "Loading private AI"}</strong><span>{modelStatus}</span></div>}<div className="camera-badge"><i className={cameraRunning ? "on" : ""} />{modelStatus}</div><div className="live-letter">{liveLetter}</div></div>
             <button className="camera-button" type="button" disabled={!modelsReady} onClick={cameraRunning ? stopCamera : startCamera}>{cameraRunning ? "Pause camera" : modelsReady ? "Start camera" : "Loading AI…"}</button>
             <div className="metrics"><div><span>Confirmed</span><strong>{confirmedLetter}</strong></div><div><span>Confidence</span><strong>{Math.round(confidence * 100)}%</strong></div></div>
             <div className="stability"><div><span>Hold sign steady</span><span>{Math.round(stability * 100)}%</span></div><progress value={stability} max="1" /></div>
@@ -361,11 +363,11 @@ export default function GestivoApp() {
         <div className="settings shell"><label>Voice<select value={voiceName} onChange={(event) => setVoiceName(event.target.value)}>{voices.map((voice) => <option value={voice.name} key={`${voice.name}-${voice.lang}`}>{voice.name} · {voice.lang}</option>)}</select></label><label>Speech rate<input type="range" min="0.7" max="1.3" step="0.1" value={speechRate} onChange={(event) => setSpeechRate(Number(event.target.value))} /><span>{speechRate.toFixed(1)}×</span></label><label>Text size<select value={textScale} onChange={(event) => setTextScale(event.target.value)}><option value="normal">Normal</option><option value="large">Large</option><option value="extra">Extra large</option></select></label></div>
       </section>
 
-      <section className="download-section shell" id="download"><div className="download-copy"><p className="eyebrow"><span /> Android app</p><h2>Take Gestivo anywhere.</h2><p>The Android version runs the same hybrid recognition system directly on your phone. It works offline after installation and asks only for camera access.</p><div className="download-points"><span>Android 8.0+</span><span>Offline recognition</span><span>Camera-only permission</span></div><a className="button button-primary download-button" href="https://github.com/gab1217/gestivo/releases/latest/download/Gestivo-Android.apk">Download Android APK</a><small>Android may ask you to allow installation from your browser.</small></div><div className="phone-mock" aria-hidden="true"><div className="phone-screen"><div className="phone-brand"><img src="/gestivo-logo.png" alt="" /><span>Gestivo</span></div><div className="phone-camera"><span>Camera ready</span><strong>G</strong></div><div className="phone-output"><small>YOUR MESSAGE</small><p>GOOD MORNING</p></div></div></div></section>
+      <section className="download-section shell" id="download"><div className="download-copy"><p className="eyebrow"><span /> Android app</p><h2>Take Gestivo anywhere.</h2><p>The Android version runs the same hybrid recognition system directly on your phone. It works offline after installation and asks only for camera access.</p><div className="download-points"><span>Android 8.0+</span><span>Offline recognition</span><span>Camera-only permission</span></div><a className="button button-primary download-button" href="https://github.com/gab1217/gestivo/releases/latest/download/Gestivo-Android.apk">Download Android APK</a><small>Android may ask you to allow installation from your browser.</small></div><div className="phone-mock" aria-hidden="true"><div className="phone-screen"><div className="phone-brand"><img src={publicAsset("/gestivo-logo.png")} alt="" /><span>Gestivo</span></div><div className="phone-camera"><span>Camera ready</span><strong>G</strong></div><div className="phone-output"><small>YOUR MESSAGE</small><p>GOOD MORNING</p></div></div></div></section>
 
       <section className="about-section" id="about"><div className="shell about-grid"><div><p className="eyebrow"><span /> Built for inclusion</p><h2>Communication should not depend on who can hear or speak.</h2></div><div className="feature-grid"><article><strong>26</strong><span>FSL alphabet classes</span></article><article><strong>2</strong><span>AI models working together</span></article><article><strong>0</strong><span>Camera frames uploaded</span></article><article><strong>∞</strong><span>Conversations worth enabling</span></article></div></div></section>
       <section className="privacy-section shell"><h2>Private by design.</h2><p>Gestivo processes camera frames inside your browser. The website does not create an account, record video, or send camera images to a server.</p><div><span>✓ On-device AI</span><span>✓ No sign-in</span><span>✓ No video storage</span></div></section>
-      <footer className="footer shell"><a className="brand" href="#top"><img src="/gestivo-logo.png" alt="" /><span>Gestivo</span></a><p>Filipino Sign Language research prototype.</p><a href="#top">Back to top ↑</a></footer>
+      <footer className="footer shell"><a className="brand" href="#top"><img src={publicAsset("/gestivo-logo.png")} alt="" /><span>Gestivo</span></a><p>Filipino Sign Language research prototype.</p><a href="#top">Back to top ↑</a></footer>
     </main>
   );
 }

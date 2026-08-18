@@ -1,12 +1,15 @@
 const CACHE_NAME = "gestivo-v1";
+const BASE_PATH = new URL("./", self.location.href).pathname.replace(/\/$/, "");
+const ROOT_PATH = `${BASE_PATH}/`;
+const asset = (path) => `${BASE_PATH}${path}`;
 const APP_SHELL = [
-  "/",
-  "/manifest.webmanifest",
-  "/gestivo-logo.png",
-  "/models/fsl_model.tflite",
-  "/models/landmark_model.tflite",
-  "/models/hand_landmarker.task",
-  "/models/labels.txt"
+  ROOT_PATH,
+  asset("/manifest.webmanifest"),
+  asset("/gestivo-logo.png"),
+  asset("/models/fsl_model.tflite"),
+  asset("/models/landmark_model.tflite"),
+  asset("/models/hand_landmarker.task"),
+  asset("/models/labels.txt")
 ];
 
 self.addEventListener("install", (event) => {
@@ -32,6 +35,6 @@ self.addEventListener("fetch", (event) => {
         caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
         return response;
       })
-      .catch(() => caches.match(event.request).then((cached) => cached || caches.match("/")))
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match(ROOT_PATH)))
   );
 });
