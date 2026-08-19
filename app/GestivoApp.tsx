@@ -14,6 +14,12 @@ type TFLiteBrowserApi = {
 };
 
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const TARGET_ANALYSIS_FPS = 10;
+const ANALYSIS_WIDTH = 384;
+const IMAGE_MODEL_INTERVAL = 5;
+const SMOOTHING_FRAMES = 4;
+const STABLE_HOLD_MS = 550;
+const MIN_CONFIRMATION_FRAMES = 5;
 const PUBLIC_BASE = typeof window !== "undefined" && window.location.hostname.endsWith("github.io") ? "/Gestivo" : "";
 const publicAsset = (path: string) => `${PUBLIC_BASE}${path}`;
 const CONNECTIONS = [
@@ -78,11 +84,13 @@ export default function GestivoApp() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
   const processCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const imageCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const engineRef = useRef<Engine | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const animationRef = useRef<number | null>(null);
   const temporalRef = useRef<TemporalState>(freshTemporalState());
   const lastVideoTimeRef = useRef(-1);
+  const lastProcessedAtRef = useRef(0);
 
   const [modelStatus, setModelStatus] = useState("Preparing private AI models…");
   const [modelsReady, setModelsReady] = useState(false);
@@ -176,6 +184,8 @@ export default function GestivoApp() {
     streamRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setCameraRunning(false);
+    lastVideoTimeRef.current = -1;
+    lastProcessedAtRef.current = 0;
     setLiveLetter("—");
     setStability(0);
     setModelStatus(modelsReady ? "Camera paused · AI ready" : "Preparing private AI models…");
@@ -219,7 +229,11 @@ export default function GestivoApp() {
     const left = Math.max(0, Math.min(...xs) - padding), top = Math.max(0, Math.min(...ys) - padding);
     const right = Math.min(source.width, Math.max(...xs) + padding), bottom = Math.min(source.height, Math.max(...ys) + padding);
     const sourceWidth = Math.max(1, right - left), sourceHeight = Math.max(1, bottom - top);
-    const output = document.createElement("canvas"); output.width = 224; output.height = 224;
+    let output = imageCanvasRef.current;
+    if (!output) {
+      output = document.createElement("canvas"); output.width = 224; output.height = 224;
+      imageCanvasRef.current = output;
+    }
     const context = output.getContext("2d", { willReadFrequently: true });
     if (!context) throw new Error("Image canvas is unavailable");
     context.fillStyle = "#000"; context.fillRect(0, 0, 224, 224);
@@ -232,7 +246,7 @@ export default function GestivoApp() {
 
   const handleNoHand = (now: number) => {
     const state = temporalRef.current;
-    state.handWasPresent = false; state.latestImage = null; state.history = []; state.candidate = null; state.candidateFrames = 0;
+    state.handWasPresent = false; state.latestImage = null; state.history = []; state.candidate = null; state.candidateStarted = 0; state.candidateFrames = 0;
     if (!state.noHandStarted) state.noHandStarted = now;
     const elapsed = now - state.noHandStarted;
     if (elapsed >= 300) state.repeatRearmed = true;
@@ -248,7 +262,7 @@ export default function GestivoApp() {
     const state = temporalRef.current;
     state.noHandStarted = 0; state.autoSpaceAdded = false;
     if (!state.handWasPresent) { state.handWasPresent = true; state.history = []; state.latestImage = null; }
-    if (!state.latestImage || state.requestNumber % 3 === 0) {
+    if (!state.latestImage || state.requestNumber % IMAGE_MODEL_INTERVAL === 0) {
       const input = imageTensor(engine.tf, source, landmarks), output = asTensor(engine.imageModel.predict(input));
       state.latestImage = Array.from(output.dataSync()); input.dispose(); output.dispose();
     }
@@ -257,15 +271,17 @@ export default function GestivoApp() {
     const landmarkProbabilities = Array.from(landmarkOutput.dataSync()); landmarkInput.dispose(); landmarkOutput.dispose();
     state.requestNumber += 1;
     const hybrid = LABELS.map((_, index) => 0.2 * (state.latestImage?.[index] ?? 0) + 0.8 * landmarkProbabilities[index]);
-    state.history.push(hybrid); if (state.history.length > 5) state.history.shift();
+    state.history.push(hybrid); if (state.history.length > SMOOTHING_FRAMES) state.history.shift();
     const smoothed = LABELS.map((_, index) => state.history.reduce((sum, values) => sum + values[index], 0) / state.history.length);
     const bestIndex = smoothed.reduce((best, value, index) => value > smoothed[best] ? index : best, 0);
     const bestConfidence = smoothed[bestIndex], letter = bestConfidence >= 0.4 ? LABELS[bestIndex] : "—";
     if (letter !== "—") {
       if (state.candidate !== letter) { state.candidate = letter; state.candidateStarted = now; state.candidateFrames = 1; }
       else state.candidateFrames += 1;
+    } else {
+      state.candidate = null; state.candidateStarted = 0; state.candidateFrames = 0;
     }
-    let progress = state.candidate ? Math.min((now - state.candidateStarted) / 500, state.candidateFrames / 4, 1) : 0;
+    let progress = state.candidate ? Math.min((now - state.candidateStarted) / STABLE_HOLD_MS, state.candidateFrames / MIN_CONFIRMATION_FRAMES, 1) : 0;
     if (state.candidate === state.lastCommitted && !state.repeatRearmed) progress = 0;
     if (state.candidate && progress >= 1 && (state.candidate !== state.lastCommitted || state.repeatRearmed)) {
       const committed = state.candidate;
@@ -278,12 +294,19 @@ export default function GestivoApp() {
   const recognitionLoop = (frameTime: number) => {
     const video = videoRef.current, engine = engineRef.current;
     if (!video || !engine || !streamRef.current) return;
-    if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.currentTime !== lastVideoTimeRef.current) {
+    const analysisInterval = 1000 / TARGET_ANALYSIS_FPS;
+    if (
+      frameTime - lastProcessedAtRef.current >= analysisInterval &&
+      video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA &&
+      video.currentTime !== lastVideoTimeRef.current
+    ) {
+      lastProcessedAtRef.current = frameTime;
       lastVideoTimeRef.current = video.currentTime;
-      const width = video.videoWidth || 640, height = video.videoHeight || 480;
+      const sourceWidth = video.videoWidth || 640, sourceHeight = video.videoHeight || 480;
+      const width = Math.min(ANALYSIS_WIDTH, sourceWidth), height = Math.max(1, Math.round(sourceHeight * width / sourceWidth));
       let canvas = processCanvasRef.current;
       if (!canvas) { canvas = document.createElement("canvas"); processCanvasRef.current = canvas; }
-      canvas.width = width; canvas.height = height;
+      if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
       const context = canvas.getContext("2d", { willReadFrequently: true });
       if (context) {
         context.save(); context.translate(width, 0); context.scale(-1, 1); context.drawImage(video, 0, 0, width, height); context.restore();
@@ -302,6 +325,7 @@ export default function GestivoApp() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       streamRef.current = stream; temporalRef.current = freshTemporalState();
+      lastVideoTimeRef.current = -1; lastProcessedAtRef.current = 0;
       const video = videoRef.current; if (!video) return;
       video.srcObject = stream; await video.play();
       setCameraRunning(true); setModelStatus("Camera ready · show one hand"); animationRef.current = requestAnimationFrame(recognitionLoop);
