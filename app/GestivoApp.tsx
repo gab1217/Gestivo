@@ -16,7 +16,10 @@ type TFLiteBrowserApi = {
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
 const TARGET_ANALYSIS_FPS = 10;
 const ANALYSIS_WIDTH = 384;
-const IMAGE_MODEL_INTERVAL = 5;
+const IMAGE_MODEL_INTERVAL = 3;
+const IMAGE_WEIGHT = 0.5;
+const LANDMARK_WEIGHT = 0.5;
+const HAND_SHAPE_REFRESH_THRESHOLD = 0.035;
 const SMOOTHING_FRAMES = 4;
 const STABLE_HOLD_MS = 550;
 const MIN_CONFIRMATION_FRAMES = 5;
@@ -38,6 +41,7 @@ type Engine = {
 type TemporalState = {
   history: number[][];
   latestImage: number[] | null;
+  previousLandmarks: Float32Array | null;
   requestNumber: number;
   handWasPresent: boolean;
   candidate: string | null;
@@ -52,7 +56,7 @@ type TemporalState = {
 type Message = { sender: "signer" | "speaker"; text: string };
 
 const freshTemporalState = (): TemporalState => ({
-  history: [], latestImage: null, requestNumber: 0, handWasPresent: false,
+  history: [], latestImage: null, previousLandmarks: null, requestNumber: 0, handWasPresent: false,
   candidate: null, candidateStarted: 0, candidateFrames: 0,
   lastCommitted: null, repeatRearmed: false, noHandStarted: 0,
   autoSpaceAdded: false,
@@ -225,7 +229,7 @@ export default function GestivoApp() {
 
   const imageTensor = (tf: typeof import("@tensorflow/tfjs-core"), source: HTMLCanvasElement, landmarks: NormalizedLandmark[]) => {
     const xs = landmarks.map((point) => point.x * source.width), ys = landmarks.map((point) => point.y * source.height);
-    const padding = Math.min(source.width, source.height) * 0.0625;
+    const padding = Math.min(source.width, source.height) / 12;
     const left = Math.max(0, Math.min(...xs) - padding), top = Math.max(0, Math.min(...ys) - padding);
     const right = Math.min(source.width, Math.max(...xs) + padding), bottom = Math.min(source.height, Math.max(...ys) + padding);
     const sourceWidth = Math.max(1, right - left), sourceHeight = Math.max(1, bottom - top);
@@ -246,7 +250,7 @@ export default function GestivoApp() {
 
   const handleNoHand = (now: number) => {
     const state = temporalRef.current;
-    state.handWasPresent = false; state.latestImage = null; state.history = []; state.candidate = null; state.candidateStarted = 0; state.candidateFrames = 0;
+    state.handWasPresent = false; state.latestImage = null; state.previousLandmarks = null; state.history = []; state.candidate = null; state.candidateStarted = 0; state.candidateFrames = 0;
     if (!state.noHandStarted) state.noHandStarted = now;
     const elapsed = now - state.noHandStarted;
     if (elapsed >= 300) state.repeatRearmed = true;
@@ -261,16 +265,21 @@ export default function GestivoApp() {
     if (!engine) return;
     const state = temporalRef.current;
     state.noHandStarted = 0; state.autoSpaceAdded = false;
-    if (!state.handWasPresent) { state.handWasPresent = true; state.history = []; state.latestImage = null; }
-    if (!state.latestImage || state.requestNumber % IMAGE_MODEL_INTERVAL === 0) {
+    if (!state.handWasPresent) { state.handWasPresent = true; state.history = []; state.latestImage = null; state.previousLandmarks = null; }
+    const vector = landmarkVector(landmarks);
+    const handShapeChanged = !state.previousLandmarks || vector.reduce(
+      (sum, value, index) => sum + Math.abs(value - (state.previousLandmarks?.[index] ?? value)), 0,
+    ) / vector.length >= HAND_SHAPE_REFRESH_THRESHOLD;
+    if (!state.latestImage || state.requestNumber % IMAGE_MODEL_INTERVAL === 0 || handShapeChanged) {
       const input = imageTensor(engine.tf, source, landmarks), output = asTensor(engine.imageModel.predict(input));
       state.latestImage = Array.from(output.dataSync()); input.dispose(); output.dispose();
     }
-    const landmarkInput = engine.tf.tensor2d(landmarkVector(landmarks), [1, 63], "float32");
+    state.previousLandmarks = vector;
+    const landmarkInput = engine.tf.tensor2d(vector, [1, 63], "float32");
     const landmarkOutput = asTensor(engine.landmarkModel.predict(landmarkInput));
     const landmarkProbabilities = Array.from(landmarkOutput.dataSync()); landmarkInput.dispose(); landmarkOutput.dispose();
     state.requestNumber += 1;
-    const hybrid = LABELS.map((_, index) => 0.2 * (state.latestImage?.[index] ?? 0) + 0.8 * landmarkProbabilities[index]);
+    const hybrid = LABELS.map((_, index) => IMAGE_WEIGHT * (state.latestImage?.[index] ?? 0) + LANDMARK_WEIGHT * landmarkProbabilities[index]);
     state.history.push(hybrid); if (state.history.length > SMOOTHING_FRAMES) state.history.shift();
     const smoothed = LABELS.map((_, index) => state.history.reduce((sum, values) => sum + values[index], 0) / state.history.length);
     const bestIndex = smoothed.reduce((best, value, index) => value > smoothed[best] ? index : best, 0);

@@ -1,4 +1,4 @@
-const CACHE_NAME = "gestivo-v2";
+const CACHE_NAME = "gestivo-v3";
 const BASE_PATH = new URL("./", self.location.href).pathname.replace(/\/$/, "");
 const ROOT_PATH = `${BASE_PATH}/`;
 const asset = (path) => `${BASE_PATH}${path}`;
