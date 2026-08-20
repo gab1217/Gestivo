@@ -14,15 +14,17 @@ type TFLiteBrowserApi = {
 };
 
 const LABELS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-const TARGET_ANALYSIS_FPS = 10;
-const ANALYSIS_WIDTH = 384;
-const IMAGE_MODEL_INTERVAL = 3;
+const TARGET_ANALYSIS_FPS = 8;
+const ANALYSIS_WIDTH = 320;
+const IMAGE_MODEL_INTERVAL = 4;
 const IMAGE_WEIGHT = 0.5;
 const LANDMARK_WEIGHT = 0.5;
 const HAND_SHAPE_REFRESH_THRESHOLD = 0.035;
-const SMOOTHING_FRAMES = 4;
-const STABLE_HOLD_MS = 550;
-const MIN_CONFIRMATION_FRAMES = 5;
+const SMOOTHING_FRAMES = 3;
+const STABLE_HOLD_MS = 400;
+const MIN_CONFIRMATION_FRAMES = 3;
+const UR_PARALLEL_COSINE_THRESHOLD = 0.936779;
+const UR_TIP_ORDER_THRESHOLD = 0.003443;
 const PUBLIC_BASE = typeof window !== "undefined" && window.location.hostname.endsWith("github.io") ? "/Gestivo" : "";
 const publicAsset = (path: string) => `${PUBLIC_BASE}${path}`;
 const ANDROID_DOWNLOAD = "https://github.com/gab1217/Gestivo/releases/latest/download/Gestivo-Android.apk";
@@ -84,6 +86,22 @@ function loadBrowserScript(src: string): Promise<void> {
     script.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
     if (!existing) document.head.appendChild(script);
   });
+}
+
+function correctParallelUConfusedAsR(probabilities: number[], vector: Float32Array) {
+  const rIndex = LABELS.indexOf("R"), uIndex = LABELS.indexOf("U");
+  const bestIndex = probabilities.reduce((best, value, index) => value > probabilities[best] ? index : best, 0);
+  if (bestIndex !== rIndex) return;
+  const x = (point: number) => vector[point * 3], y = (point: number) => vector[point * 3 + 1];
+  const indexX = x(8) - x(5), indexY = y(8) - y(5);
+  const middleX = x(12) - x(9), middleY = y(12) - y(9);
+  const indexLength = Math.hypot(indexX, indexY), middleLength = Math.hypot(middleX, middleY);
+  if (!indexLength || !middleLength) return;
+  const directionCosine = (indexX * middleX + indexY * middleY) / (indexLength * middleLength);
+  const tipOrder = (x(8) - x(12)) * (x(5) - x(9));
+  if (directionCosine > UR_PARALLEL_COSINE_THRESHOLD && tipOrder > UR_TIP_ORDER_THRESHOLD) {
+    probabilities[uIndex] = Math.max(probabilities[uIndex], probabilities[rIndex] + 0.001);
+  }
 }
 
 export default function GestivoApp({ view = "home" }: { view?: "home" | "recognizer" }) {
@@ -289,6 +307,7 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
     const landmarkProbabilities = Array.from(landmarkOutput.dataSync()); landmarkInput.dispose(); landmarkOutput.dispose();
     state.requestNumber += 1;
     const hybrid = LABELS.map((_, index) => IMAGE_WEIGHT * (state.latestImage?.[index] ?? 0) + LANDMARK_WEIGHT * landmarkProbabilities[index]);
+    correctParallelUConfusedAsR(hybrid, vector);
     state.history.push(hybrid); if (state.history.length > SMOOTHING_FRAMES) state.history.shift();
     const smoothed = LABELS.map((_, index) => state.history.reduce((sum, values) => sum + values[index], 0) / state.history.length);
     const bestIndex = smoothed.reduce((best, value, index) => value > smoothed[best] ? index : best, 0);
@@ -341,7 +360,7 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
   const startCamera = async () => {
     if (!modelsReady || cameraRunning) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 480 }, height: { ideal: 360 }, frameRate: { ideal: 24, max: 30 } }, audio: false });
       streamRef.current = stream; temporalRef.current = freshTemporalState();
       lastVideoTimeRef.current = -1; lastProcessedAtRef.current = 0;
       const video = videoRef.current; if (!video) return;
@@ -350,7 +369,11 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
     } catch (error) { console.error(error); setModelStatus("Camera permission is needed to recognize signs"); }
   };
 
-  useEffect(() => () => stopCamera(), [stopCamera]);
+  useEffect(() => () => {
+    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    engineRef.current?.handLandmarker.close();
+  }, []);
 
   const chooseMode = (nextMode: "sign" | "type") => { setMode(nextMode); if (nextMode === "type") stopCamera(); };
   const addMessage = (sender: Message["sender"], text: string) => {
