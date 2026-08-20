@@ -20,7 +20,7 @@ export async function generateMetadata(): Promise<Metadata> {
   const origin = `${protocol}://${host}`;
   const title = "Gestivo — Every gesture finds its voice";
   const description = "A Filipino Sign Language assistant for real-time text and speech, powered privately in your browser.";
-  const socialImage = `${origin}/og.png`;
+  const socialImage = `${origin}/og-v2.png`;
 
   return {
     title,

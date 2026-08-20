@@ -1,15 +1,12 @@
-const CACHE_NAME = "gestivo-v3";
+const CACHE_NAME = "gestivo-v4";
 const BASE_PATH = new URL("./", self.location.href).pathname.replace(/\/$/, "");
 const ROOT_PATH = `${BASE_PATH}/`;
 const asset = (path) => `${BASE_PATH}${path}`;
 const APP_SHELL = [
   ROOT_PATH,
+  asset("/recognizer/"),
   asset("/manifest.webmanifest"),
-  asset("/gestivo-logo.png"),
-  asset("/models/fsl_model.tflite"),
-  asset("/models/landmark_model.tflite"),
-  asset("/models/hand_landmarker.task"),
-  asset("/models/labels.txt")
+  asset("/gestivo-logo.png")
 ];
 
 self.addEventListener("install", (event) => {
