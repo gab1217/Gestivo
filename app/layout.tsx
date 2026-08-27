@@ -24,6 +24,7 @@ export function generateMetadata(): Metadata {
     icons: { icon: "/gestivo-logo.png", shortcut: "/gestivo-logo.png" },
     manifest: "/manifest.webmanifest",
     applicationName: "Gestivo",
+    verification: { google: "8J7W7IaL__r7SZyB4UnFaRGybyYDPPGM-6dBVSECfGQ" },
     metadataBase: new URL(`${origin}/`),
     alternates: { canonical: `${origin}/` },
     robots: { index: true, follow: true, googleBot: { index: true, follow: true, "max-image-preview": "large" } },
