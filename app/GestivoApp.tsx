@@ -23,8 +23,13 @@ const HAND_SHAPE_REFRESH_THRESHOLD = 0.035;
 const SMOOTHING_FRAMES = 3;
 const STABLE_HOLD_MS = 400;
 const MIN_CONFIRMATION_FRAMES = 3;
+const AUTO_SPACE_DELAY_MS = 2000;
 const UR_PARALLEL_COSINE_THRESHOLD = 0.936779;
 const UR_TIP_ORDER_THRESHOLD = 0.003443;
+const O_THUMB_INDEX_GAP_THRESHOLD = 0.29855;
+const O_LITTLE_FINGER_ROUND_THRESHOLD = 0.32286;
+const M_THUMB_TIP_DISTANCE_THRESHOLD = 0.4319;
+const M_MIDDLE_FINGER_FOLD_THRESHOLD = 0.2141;
 const PUBLIC_BASE = typeof window !== "undefined" && window.location.hostname.endsWith("github.io") ? "/Gestivo" : "";
 const publicAsset = (path: string) => `${PUBLIC_BASE}${path}`;
 const ANDROID_DOWNLOAD = "https://github.com/gab1217/Gestivo/releases/latest/download/Gestivo-Android.apk";
@@ -102,6 +107,32 @@ function correctParallelUConfusedAsR(probabilities: number[], vector: Float32Arr
   if (directionCosine > UR_PARALLEL_COSINE_THRESHOLD && tipOrder > UR_TIP_ORDER_THRESHOLD) {
     probabilities[uIndex] = Math.max(probabilities[uIndex], probabilities[rIndex] + 0.001);
   }
+}
+
+function correctClosedHandConfusedAsS(probabilities: number[], vector: Float32Array) {
+  const sIndex = LABELS.indexOf("S"), mIndex = LABELS.indexOf("M"), oIndex = LABELS.indexOf("O");
+  const bestIndex = probabilities.reduce((best, value, index) => value > probabilities[best] ? index : best, 0);
+  if (bestIndex !== sIndex) return;
+
+  const point = (index: number) => ({ x: vector[index * 3], y: vector[index * 3 + 1], z: vector[index * 3 + 2] });
+  const distance = (first: number, second: number, dimensions = 3) => {
+    const left = point(first), right = point(second);
+    const x = left.x - right.x, y = left.y - right.y, z = dimensions === 3 ? left.z - right.z : 0;
+    return Math.hypot(x, y, z);
+  };
+  const palm = Math.max(distance(0, 9), 1e-6);
+  const thumbIndexGap2d = distance(4, 8, 2) / palm;
+  const littleFingerRound = distance(20, 17) / palm;
+  const isO = thumbIndexGap2d < O_THUMB_INDEX_GAP_THRESHOLD && littleFingerRound > O_LITTLE_FINGER_ROUND_THRESHOLD;
+  if (isO) {
+    probabilities[oIndex] = Math.max(probabilities[oIndex], probabilities[sIndex] + 0.001);
+    return;
+  }
+
+  const thumbTipDistanceMax = Math.max(...[8, 12, 16, 20].map((tip) => distance(4, tip) / palm));
+  const middleFingerFold = distance(12, 11) / palm;
+  const isM = thumbTipDistanceMax > M_THUMB_TIP_DISTANCE_THRESHOLD && middleFingerFold > M_MIDDLE_FINGER_FOLD_THRESHOLD;
+  if (isM) probabilities[mIndex] = Math.max(probabilities[mIndex], probabilities[sIndex] + 0.001);
 }
 
 export default function GestivoApp({ view = "home" }: { view?: "home" | "recognizer" }) {
@@ -281,7 +312,7 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
     if (!state.noHandStarted) state.noHandStarted = now;
     const elapsed = now - state.noHandStarted;
     if (elapsed >= 300) state.repeatRearmed = true;
-    if (elapsed >= 3000 && !state.autoSpaceAdded) { state.autoSpaceAdded = true; setDraft((value) => value && !value.endsWith(" ") ? `${value} ` : value); }
+    if (elapsed >= AUTO_SPACE_DELAY_MS && !state.autoSpaceAdded) { state.autoSpaceAdded = true; setDraft((value) => value && !value.endsWith(" ") ? `${value} ` : value); }
     setLiveLetter("—"); setConfidence(0); setStability(0); setModelStatus("No hand detected");
     const overlay = overlayRef.current;
     if (overlay) overlay.getContext("2d")?.clearRect(0, 0, overlay.width, overlay.height);
@@ -308,6 +339,7 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
     state.requestNumber += 1;
     const hybrid = LABELS.map((_, index) => IMAGE_WEIGHT * (state.latestImage?.[index] ?? 0) + LANDMARK_WEIGHT * landmarkProbabilities[index]);
     correctParallelUConfusedAsR(hybrid, vector);
+    correctClosedHandConfusedAsS(hybrid, vector);
     state.history.push(hybrid); if (state.history.length > SMOOTHING_FRAMES) state.history.shift();
     const smoothed = LABELS.map((_, index) => state.history.reduce((sum, values) => sum + values[index], 0) / state.history.length);
     const bestIndex = smoothed.reduce((best, value, index) => value > smoothed[best] ? index : best, 0);
@@ -444,7 +476,7 @@ export default function GestivoApp({ view = "home" }: { view?: "home" | "recogni
             <div className="panel-title"><div><span>Conversation</span><small>{messages.length ? `${messages.length} messages` : "Ready when you are"}</small></div><button type="button" onClick={() => setMessages([])} disabled={!messages.length}>Clear</button></div>
             <div className="messages" aria-live="polite">{!messages.length && <div className="empty-conversation"><strong>Your conversation will appear here.</strong><span>Sign a message or type a reply to begin.</span></div>}{messages.map((message, index) => <div className={`message ${message.sender}`} key={`${message.sender}-${index}`}><p>{message.text}</p><small>{message.sender === "signer" ? "Signed by you" : "Typed reply"}</small></div>)}</div>
             <div className="composer"><div className="mode-switch" role="tablist" aria-label="Message input mode"><button type="button" className={mode === "sign" ? "active" : ""} onClick={() => chooseMode("sign")}>Sign → Speech</button><button type="button" className={mode === "type" ? "active" : ""} onClick={() => chooseMode("type")}>Type a reply</button></div>
-              {mode === "sign" ? <><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Recognized letters will appear here" aria-label="Recognized sign message" /><div className="composer-actions"><button type="button" onClick={() => setDraft((value) => `${value} `)}>Space</button><button type="button" onClick={() => setDraft((value) => value.slice(0, -1))}>Delete</button><button type="button" onClick={() => { setDraft(""); setConfirmedLetter("—"); temporalRef.current = freshTemporalState(); }}>Clear</button><span /><button type="button" onClick={() => speak(draft)}>Speak</button><button className="primary-small" type="button" onClick={() => addMessage("signer", draft)}>Add message</button></div></> : <><textarea value={typedReply} onChange={(event) => setTypedReply(event.target.value)} placeholder="Type the other person's reply" aria-label="Typed reply" /><div className="composer-actions"><span /><button type="button" onClick={() => speak(typedReply)}>Speak</button><button className="primary-small" type="button" onClick={() => addMessage("speaker", typedReply)}>Add reply</button></div></>}
+              {mode === "sign" ? <><textarea value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Recognized letters will appear here" aria-label="Recognized sign message" /><div className="composer-actions"><button type="button" onClick={() => setDraft((value) => `${value} `)}>Space</button><button type="button" aria-label="Add question mark" onClick={() => setDraft((value) => `${value.trimEnd()}?`)}>?</button><button type="button" aria-label="Add exclamation mark" onClick={() => setDraft((value) => `${value.trimEnd()}!`)}>!</button><button type="button" onClick={() => setDraft((value) => value.slice(0, -1))}>Delete</button><button type="button" onClick={() => { setDraft(""); setConfirmedLetter("—"); temporalRef.current = freshTemporalState(); }}>Clear</button><span /><button type="button" onClick={() => speak(draft)}>Speak</button><button className="primary-small" type="button" onClick={() => addMessage("signer", draft)}>Add message</button></div></> : <><textarea value={typedReply} onChange={(event) => setTypedReply(event.target.value)} placeholder="Type the other person's reply" aria-label="Typed reply" /><div className="composer-actions"><span /><button type="button" onClick={() => speak(typedReply)}>Speak</button><button className="primary-small" type="button" onClick={() => addMessage("speaker", typedReply)}>Add reply</button></div></>}
             </div>
           </div>
           <div className="recognition-panel">
