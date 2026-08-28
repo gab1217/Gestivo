@@ -182,6 +182,13 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
 .feature-grid article { min-height: 150px; padding: 22px; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid var(--border); border-radius: 17px; background: var(--surface); }
 .feature-grid strong { color: var(--accent); font-size: 42px; }
 .feature-grid span { color: var(--muted); font-size: 12px; }
+.team-card { grid-column: 1 / -1; padding: 28px; border: 1px solid var(--border); border-radius: 24px; background: var(--surface); }
+.team-card h3 { margin: 8px 0 0; font-size: clamp(24px, 3vw, 36px); }
+.team-members { margin-top: 24px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+.team-members article { min-height: 96px; padding: 17px; display: flex; flex-direction: column; justify-content: center; gap: 6px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-raised); }
+.team-members .team-lead { border-color: var(--accent); background: linear-gradient(135deg, rgba(104,224,172,.12), var(--surface-raised)); }
+.team-members strong { font-size: 14px; }
+.team-members span { color: var(--muted); font-size: 11px; }
 .privacy-section { margin-block: 110px; padding: 55px; border: 1px solid var(--border); border-radius: 28px; text-align: center; background: radial-gradient(circle at 50% 0, #1a392b, var(--surface) 65%); }
 .privacy-section h2 { margin-top: 0; }
 .privacy-section p { max-width: 700px; margin: 0 auto; color: var(--muted); line-height: 1.65; }
@@ -205,6 +212,7 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
   .download-copy .eyebrow, .download-points { justify-content: center; }
   .download-copy > p:not(.eyebrow) { margin-inline: auto; }
   .about-grid { gap: 35px; }
+  .team-members { grid-template-columns: 1fr 1fr; }
   .choice-grid { grid-template-columns: 1fr; }
   .choice-grid article { min-height: 220px; }
   .choice-grid h3 { margin-top: 24px; }
@@ -214,6 +222,8 @@ button:focus-visible, a:focus-visible, select:focus-visible, textarea:focus-visi
 }
 @media (max-width: 520px) {
   .shell { width: min(100% - 28px, 1180px); }
+  .team-card { padding: 20px; }
+  .team-members { grid-template-columns: 1fr; }
   .nav { height: 72px; }
   .hero { min-height: auto; padding: 36px 0 70px; }
   h1 { font-size: 52px; }
