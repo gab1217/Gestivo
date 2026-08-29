@@ -32,7 +32,7 @@ const M_THUMB_TIP_DISTANCE_THRESHOLD = 0.4319;
 const M_MIDDLE_FINGER_FOLD_THRESHOLD = 0.2141;
 const PUBLIC_BASE = typeof window !== "undefined" && window.location.hostname.endsWith("github.io") ? "/Gestivo" : "";
 const publicAsset = (path: string) => `${PUBLIC_BASE}${path}`;
-const ANDROID_DOWNLOAD = "https://github.com/gab1217/Gestivo/releases/latest/download/Gestivo-Android.apk";
+const ANDROID_DOWNLOAD = "https://github.com/gab1217/Gestivo/releases/download/v0.6.2/Gestivo-Android.apk";
 const WINDOWS_DOWNLOAD = "https://github.com/gab1217/Gestivo/releases/download/desktop-v1.0.5/Gestivo-Setup-v1.0.5.exe";
 const CONNECTIONS = [
   [0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8],
